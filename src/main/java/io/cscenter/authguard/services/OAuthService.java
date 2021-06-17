@@ -1,7 +1,6 @@
 package io.cscenter.authguard.services;
 
 import java.security.PrivateKey;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -17,8 +16,6 @@ import io.cscenter.authguard.error.exceptions.UsernameAlreadyTakenInDomainExcept
 import io.cscenter.shared.dto.CustomerIdentifierDTO;
 import io.cscenter.shared.dto.OAuthTokenDTO;
 import io.cscenter.shared.dto.enums.Domain;
-import io.cscenter.shared.helpers.Randomize;
-import io.jsonwebtoken.Claims;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
@@ -69,8 +66,7 @@ public class OAuthService {
             return Optional.empty();
         }
 
-        OAuthTokenDTO token = this.oAuthTokenService.createOAuthToken(possibleCustomer.get().transform(),
-                Set.of("OAUTH_REFRESH", "OAUTH_INVALIDATE", "SCOPES_LIST"));
+        OAuthTokenDTO token = this.oAuthTokenService.createOAuthToken(possibleCustomer.get().transform(), Set.of());
 
         return Optional.of(token);
     }
@@ -88,20 +84,16 @@ public class OAuthService {
 
     }
 
-    public String refresh(String refreshToken) {
+    public OAuthTokenDTO refresh(String refreshToken) {
 
         OAuthTokenEntity correspondingOAuthTokenEntity = this.oAuthTokenService
                 .getCorrespondingOAuthTokenEntityByRefreshToken(refreshToken);
 
         final String accessToken = correspondingOAuthTokenEntity.getToken();
 
-        final PrivateKey key = correspondingOAuthTokenEntity.getPrivateKey();
+        final OAuthTokenDTO prolongedAccessToken = this.oAuthTokenService.prolongAccessToken(accessToken);
 
-        final String prolongedAccessToken = this.oAuthTokenService.prolongAccessToken(accessToken, key);
-
-        correspondingOAuthTokenEntity.setToken(prolongedAccessToken);
-
-        this.oAuthTokenEntityRepository.save(correspondingOAuthTokenEntity);
+        this.oAuthTokenService.delete(correspondingOAuthTokenEntity);
 
         return prolongedAccessToken;
     }

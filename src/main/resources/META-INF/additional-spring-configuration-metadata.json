@@ -1,0 +1,5 @@
+{"properties": [{
+  "name": "irr.subnets.allowed",
+  "type": "java.util.SET",
+  "description": "'irr.subnets.allowed' contains all allowed Subnets from which Internal Resource Requests are allowed from"
+}]}

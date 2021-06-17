@@ -42,7 +42,7 @@ public class JwtOauthTokenDataHandler implements JwtHandler<OAuthTokenDataDTO> {
         @SuppressWarnings("unchecked")
         Set<String> scopes = Set.copyOf(claims.get("scopes", ArrayList.class));
 
-        return OAuthTokenDataDTO.builder()
+        return OAuthTokenDataDTO.builder().subject(claims.getSubject())
                 .customerIdentifier(CustomerIdentifierDTO.builder()
                         .identifier(UUID.fromString(claims.get("customer_identifier", String.class)))
                         .domain(Domain.convert(claims.get("customer_domain", String.class))).build())

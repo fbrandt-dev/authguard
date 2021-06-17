@@ -57,17 +57,19 @@ public class OAuthTokenEntity implements Transformable<OAuthTokenDTO> {
     @Column(nullable = false)
     private PublicKey key;
 
-    @Column(nullable = false)
-    private PrivateKey privateKey;
+    private Date tokenIssuedAt;
 
     private Date tokenValidUntil;
+
+    private Date refreshTokenIssuedAt;
 
     private Date refreshTokenValidUntil;
 
     @Override
     public OAuthTokenDTO transform() {
-        return OAuthTokenDTO.builder().token(token).refreshToken(refreshToken).customer(customer.transform())
-                .identifier(identifier).build();
+        return OAuthTokenDTO.builder().access_token(token).access_token_expires_at(tokenValidUntil)
+                .refresh_token(refreshToken).refresh_token_expires_at(refreshTokenValidUntil)
+                .customer(customer.transform()).identifier(identifier).build();
     }
 
 }

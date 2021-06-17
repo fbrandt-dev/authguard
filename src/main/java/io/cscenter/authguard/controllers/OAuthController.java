@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import io.cscenter.authguard.annotated.Security;
+import io.cscenter.authguard.data.OAuthTokenEntity;
 import io.cscenter.authguard.data.SecurityContext;
 import io.cscenter.authguard.http.request.AuthenticationRequest;
 import io.cscenter.authguard.http.request.RefreshRequest;
@@ -23,7 +24,7 @@ import io.cscenter.shared.dto.enums.SecurityStatus;
 import lombok.extern.slf4j.Slf4j;
 
 @RestController
-@RequestMapping("/oauth")
+@RequestMapping("/public/oauth")
 @Slf4j
 public class OAuthController {
 
@@ -66,16 +67,26 @@ public class OAuthController {
             return ResponseEntity.badRequest().build();
         }
 
-        return ResponseEntity.ok(AuthenticationResponse.builder().tokens(possibleToken.get()).build());
+        OAuthTokenDTO oAuthTokenDTO = possibleToken.get();
+
+        return ResponseEntity.ok(AuthenticationResponse.builder().access_token(oAuthTokenDTO.getAccess_token())
+                .refresh_token(oAuthTokenDTO.getRefresh_token()).customer(oAuthTokenDTO.getCustomer())
+                .identifier(oAuthTokenDTO.getIdentifier())
+                .refresh_token_expires_at(oAuthTokenDTO.getRefresh_token_expires_at())
+                .access_token_expires_at(oAuthTokenDTO.getAccess_token_expires_at()).build());
     }
 
     @PostMapping("/refresh")
     @Security(securityStatus = SecurityStatus.UNAUTHENTICATED)
     public ResponseEntity<AccessTokenProlongiationResponse> refresh(@RequestBody final RefreshRequest request) {
 
-        String prolongedAccessToken = this.customerService.refresh(request.getRefreshToken());
+        OAuthTokenDTO prolongedAccessToken = this.customerService.refresh(request.getRefreshToken());
 
-        return ResponseEntity.ok(AccessTokenProlongiationResponse.builder().token(prolongedAccessToken).build());
+        return ResponseEntity
+                .ok(AccessTokenProlongiationResponse.builder().access_token(prolongedAccessToken.getAccess_token())
+                        .refresh_token(prolongedAccessToken.getRefresh_token())
+                        .access_token_expires_at(prolongedAccessToken.getAccess_token_expires_at())
+                        .refresh_token_expires_at(prolongedAccessToken.getRefresh_token_expires_at()).build());
     }
 
     @GetMapping("/status")

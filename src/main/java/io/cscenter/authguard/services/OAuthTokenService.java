@@ -1,7 +1,6 @@
 package io.cscenter.authguard.services;
 
 import java.security.KeyPair;
-import java.security.PrivateKey;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Date;
@@ -34,6 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 public class OAuthTokenService {
 
     private static final String AUTHGUARD_SECURITY_GATEWAY = "authguard@security-gateway";
+    private static final int TOKEN_LIFETIME = 1800; // 30 minutes
 
     private final OAuthTokenEntityRepository tokenRepository;
     private final CustomerEntityRepository customerRepository;
@@ -57,31 +57,16 @@ public class OAuthTokenService {
     }
 
     public OAuthTokenDTO createOAuthToken(final CustomerIdentifierDTO customer, Set<String> scopes) {
-        final KeyPair key = Keys.keyPairFor(SignatureAlgorithm.PS512);
 
         final UUID customerIdentifier = customer.getIdentifier();
         final Domain customerDomain = customer.getDomain();
-        final String subject = customerIdentifier.toString();
 
         final Optional<CustomerEntity> optionalCustomerEntity = this.customerRepository
                 .findById(CustomerIdentifier.builder().domain(customerDomain).identifier(customerIdentifier).build());
 
         if (optionalCustomerEntity.isPresent()) {
-            final String access_jws = Jwts.builder().setSubject(subject).setIssuedAt(Date.from(Instant.now()))
-                    .setAudience(AUTHGUARD_SECURITY_GATEWAY).setExpiration(Date.from(Instant.now().plusSeconds(1800)))
-                    .setIssuer(AUTHGUARD_SECURITY_GATEWAY).signWith(key.getPrivate())
-                    .claim("customer_identifier", customerIdentifier).claim("scopes", scopes)
-                    .claim("customer_domain", customerDomain.toString()).compact();
 
-            final String refresh_jws = Jwts.builder().setSubject(subject).setIssuedAt(Date.from(Instant.now()))
-                    .setAudience(AUTHGUARD_SECURITY_GATEWAY)
-                    .setExpiration(Date.from(Instant.now().plusSeconds(1800 * 4))).setIssuer(AUTHGUARD_SECURITY_GATEWAY)
-                    .signWith(key.getPrivate()).claim("customer_identifier", customerIdentifier)
-                    .claim("customer_domain", customerDomain.toString()).claim("scopes", scopes).compact();
-
-            final OAuthTokenEntity tokenEntity = OAuthTokenEntity.builder().customer(optionalCustomerEntity.get())
-                    .key(key.getPublic()).privateKey(key.getPrivate()).token(access_jws).refreshToken(refresh_jws)
-                    .build();
+            final OAuthTokenEntity tokenEntity = this.generateTokens(optionalCustomerEntity.get(), scopes);
 
             this.tokenRepository.save(tokenEntity);
 
@@ -96,7 +81,6 @@ public class OAuthTokenService {
 
     public OAuthTokenEntity getCorrespondingOAuthTokenEntityByRefreshToken(final String jws) {
         Optional<OAuthTokenEntity> possibleTokenEntity = this.tokenRepository.findByRefreshToken(jws);
-
         if (possibleTokenEntity.isEmpty()) {
             throw new TokenAuthenticityException("Could not verify Token!");
         }
@@ -112,20 +96,22 @@ public class OAuthTokenService {
         }
     }
 
-    public String prolongAccessToken(final String jws, final PrivateKey key) {
+    public OAuthTokenDTO prolongAccessToken(final String jws) {
 
         final OAuthTokenDataDTO data = this.parseAccessToken(jws);
-        final UUID customerIdentifier = data.getCustomerIdentifier().getIdentifier();
         final Domain customerDomain = data.getCustomerIdentifier().getDomain();
+        final String customerUsername = data.getSubject();
         final Set<String> scopes = data.getScopes();
 
-        final String access_jws = Jwts.builder().setSubject(customerIdentifier.toString())
-                .setIssuedAt(Date.from(Instant.now())).setAudience(AUTHGUARD_SECURITY_GATEWAY)
-                .setExpiration(Date.from(Instant.now().plusSeconds(1800))).setIssuer(AUTHGUARD_SECURITY_GATEWAY)
-                .signWith(key).claim("customer_identifier", customerIdentifier).claim("scopes", scopes)
-                .claim("customer_domain", customerDomain.toString()).compact();
+        final Optional<CustomerEntity> customer = this.customerRepository
+                .findByCustomerIdentifier_DomainAndUsername(customerDomain, customerUsername);
 
-        return access_jws;
+        if (customer.isEmpty()) {
+            return null;
+        }
+
+        OAuthTokenEntity createdToken = this.generateTokens(customer.get(), scopes);
+        return this.tokenRepository.save(createdToken).transform();
     }
 
     public OAuthTokenDataDTO parseAccessToken(final String jws) {
@@ -144,6 +130,46 @@ public class OAuthTokenService {
         } catch (ExpiredJwtException e) {
             throw new TokenExpiredException(e.getMessage());
         }
+    }
+
+    private OAuthTokenEntity generateTokens(final CustomerEntity customer, final Set<String> scopes) {
+        final KeyPair key = Keys.keyPairFor(SignatureAlgorithm.PS512);
+
+        CustomerIdentifier customerIdentification = customer.getCustomerIdentifier();
+
+        final UUID customerIdentifier = customerIdentification.getIdentifier();
+        final Domain customerDomain = customerIdentification.getDomain();
+
+        final Instant instant = Instant.now();
+
+        final Date refresh_token_issued_at = Date.from(instant);
+        final Date refresh_token_expiration_date = Date.from(instant.plusSeconds(TOKEN_LIFETIME * 4));
+
+        final Date access_token_issued_at = Date.from(instant);
+        final Date access_token_expiration_date = Date.from(instant.plusSeconds(TOKEN_LIFETIME));
+
+        final String access_token = Jwts.builder().setSubject(customer.getUsername())
+                .setIssuedAt(access_token_issued_at).setAudience(AUTHGUARD_SECURITY_GATEWAY)
+                .setExpiration(access_token_expiration_date).setIssuer(AUTHGUARD_SECURITY_GATEWAY)
+                .signWith(key.getPrivate()).claim("customer_identifier", customerIdentifier).claim("scopes", scopes)
+                .claim("customer_domain", customerDomain.toString()).compact();
+
+        final String refresh_token = Jwts.builder().setSubject(customer.getUsername())
+                .setIssuedAt(refresh_token_issued_at).setAudience(AUTHGUARD_SECURITY_GATEWAY)
+                .setExpiration(refresh_token_expiration_date).setIssuer(AUTHGUARD_SECURITY_GATEWAY)
+                .signWith(key.getPrivate()).claim("customer_identifier", customerIdentifier)
+                .claim("scopes", Set.of("REFRESH_TOKEN")).claim("customer_domain", customerDomain.toString()).compact();
+
+        return OAuthTokenEntity.builder().customer(customer).key(key.getPublic()).refreshToken(refresh_token)
+                .token(access_token).refreshTokenIssuedAt(refresh_token_issued_at)
+                .refreshTokenValidUntil(refresh_token_expiration_date).tokenIssuedAt(access_token_issued_at)
+                .tokenValidUntil(access_token_expiration_date).build();
+    }
+
+    public void delete(OAuthTokenEntity correspondingOAuthTokenEntity) {
+
+        this.tokenRepository.delete(correspondingOAuthTokenEntity);
+
     }
 
 }
